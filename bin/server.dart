@@ -7,7 +7,7 @@ import 'package:shelf_router/shelf_router.dart';
 
 Future<Response> _webhookHandler(Request request) async {
   final body = await request.readAsString();
-  print('💬 Telegram Webhook: \$body');
+  print('💬 Telegram Webhook: $body');
 
   // Здесь можно добавить обработку и сохранение в файл, Hive или другую БД
 
