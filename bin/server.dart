@@ -114,10 +114,12 @@ Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, Stri
   }
 }
 Future<String> getAccessTokenFromServiceAccount() async {
-  final serviceAccountJson = jsonDecode(
-    await File('serviceAccount.json').readAsString(),
-  );
+  final envJson = Platform.environment['SERVICE_ACCOUNT'];
+  if (envJson == null) {
+    throw Exception('SERVICE_ACCOUNT environment variable not found');
+  }
 
+  final serviceAccountJson = jsonDecode(envJson);
   final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
 
   final scopes = ['https://www.googleapis.com/auth/firebase.database'];
@@ -126,9 +128,9 @@ Future<String> getAccessTokenFromServiceAccount() async {
   final accessToken = client.credentials.accessToken.data;
 
   client.close();
-
   return accessToken;
 }
+
 void main() async {
   final router = Router()..post('/webhook', _webhookHandler);
 
