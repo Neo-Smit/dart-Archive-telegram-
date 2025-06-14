@@ -1,26 +1,28 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:googleapis_auth/auth_io.dart';
-import 'package:jose/jose.dart';
 
-import 'myConstants.dart';
+import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
+import 'myConstants.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as io;
 import 'package:shelf_router/shelf_router.dart';
 
-final firebaseUrl=MyConstants.firebaseUrl;
+const firebaseUrl = MyConstants.firebaseUrl; // 👈 Укажи свой URL
+const telegramBotToken = MyConstants.botToken; // 👈 Укажи токен бота
+const telegramChatId = MyConstants.chat_id_Test; // 👈 Укажи ID группы/канала для ошибок
+
 Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
   final timestamp = DateTime.now();
   final year = timestamp.year.toString();
   final month = timestamp.month.toString().padLeft(2, '0');
   final day = timestamp.day.toString().padLeft(2, '0');
   final messageId = message['message_id'].toString();
-  final token = await getAccessTokenFromServiceAccount();
-   // 👈 Укажи свой проект
-  final path = '$firebaseUrl$year/$month/$day/$messageId.json?access_token=$token';
 
-  final payload = jsonEncode({
+  final token = await getAccessTokenFromServiceAccount();
+  final url = '$firebaseUrl$year/$month/$day/$messageId.json?access_token=$token';
+
+  final payload = {
     'text': message['text'],
     'from': {
       'id': message['from']['id'],
@@ -29,42 +31,39 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
     },
     'chat_id': message['chat']['id'],
     'timestamp': timestamp.toIso8601String(),
-  });
+  };
 
-  final response = await HttpClient()
-      .postUrl(Uri.parse(path))
-      .then((req) {
-    req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-    req.write(payload);
-    return req.close();
-  });
+  try {
+    final response = await http.put(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
 
-  if (response.statusCode == 200) {
-    print('✅ Message saved to Firebase');
-  } else {
-    print('❌ Failed to save message. Code: ${response.statusCode}');
-
+    if (response.statusCode == 200) {
+      print('✅ Message saved to Firebase');
+    } else {
+      print('❌ Failed to save message. Code: ${response.statusCode}');
+      await sendErrorToTelegram('❌ Firebase error: ${response.statusCode}');
+    }
+  } catch (e) {
+    print('❗ Save exception: $e');
+    await sendErrorToTelegram('❗ Save exception: $e');
   }
 }
 
 Future<void> sendErrorToTelegram(String message) async {
-  const String botToken = 'YOUR_BOT_TOKEN';
-  const String chatId = '-1001234567890'; // замени на ID своего канала
-
-  final Uri uri = Uri.parse(
-    'https://api.telegram.org/bot$botToken/sendMessage',
+  final uri = Uri.parse(
+    'https://api.telegram.org/bot$telegramBotToken/sendMessage',
   );
 
-  final response = await http.post(
-    uri,
-    body: {
-      'chat_id': chatId,
-      'text': '🚨 Ошибка: $message',
-    },
-  );
+  final response = await http.post(uri, body: {
+    'chat_id': telegramChatId,
+    'text': message,
+  });
 
   if (response.statusCode != 200) {
-    print('⚠️ Не удалось отправить сообщение об ошибке: ${response.body}');
+    print('⚠️ Failed to send error to Telegram: ${response.body}');
   }
 }
 
@@ -74,59 +73,47 @@ Future<Response> _webhookHandler(Request request) async {
 
   try {
     final data = jsonDecode(body);
-
     if (data.containsKey('message')) {
       await saveMessageToFirebase(data['message']);
     }
   } catch (e) {
     print('❗ Error parsing/saving: $e');
+    await sendErrorToTelegram('❗ JSON parsing error: $e');
   }
 
   return Response.ok('ok');
 }
-Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, String day) async {
-  final formattedMonth = month.padLeft(2, '0');
-  final formattedDay = day.padLeft(2, '0');
-  final token = await getAccessTokenFromServiceAccount();
 
-  final url = Uri.parse(
-    '$firebaseUrl/messages/$year/$formattedMonth/$formattedDay.json?access_token=$token',
-  );
+Future<Map<String, dynamic>> fetchMessagesByDate(
+    String year, String month, String day) async {
+  final token = await getAccessTokenFromServiceAccount();
+  final url = Uri.parse('$firebaseUrl$year/$month/$day.json?access_token=$token');
 
   try {
     final response = await http.get(url);
-
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      if (data == null) {
-        print('📭 Нет сообщений за $formattedDay.$formattedMonth.$year');
-        return {};
-      }
-
-      return Map<String, dynamic>.from(data);
+      return data != null ? Map<String, dynamic>.from(data) : {};
     } else {
-      print('❌ Ошибка при чтении (${response.statusCode}): ${response.body}');
+      print('❌ Error fetching messages: ${response.statusCode}');
       return {};
     }
   } catch (e) {
-    print('❌ Исключение при чтении: $e');
+    print('❌ Exception while fetching: $e');
     return {};
   }
 }
+
 Future<String> getAccessTokenFromServiceAccount() async {
   final envJson = Platform.environment['SERVICE_ACCOUNT'];
-  if (envJson == null) {
-    throw Exception('SERVICE_ACCOUNT environment variable not found');
-  }
-
+  if (envJson == null) throw Exception('SERVICE_ACCOUNT is not set');
   final serviceAccountJson = jsonDecode(envJson);
-  final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
 
+  final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
   final scopes = ['https://www.googleapis.com/auth/firebase.database'];
 
   final client = await clientViaServiceAccount(credentials, scopes);
   final accessToken = client.credentials.accessToken.data;
-
   client.close();
   return accessToken;
 }
@@ -141,6 +128,8 @@ void main() async {
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   print('🚀 Server running on port $port');
+
+  // Пример чтения всех сообщений за определённую дату
   final messages = await fetchMessagesByDate('2025', '06', '14');
   messages.forEach((id, msg) {
     print('🔸 $id: ${msg['text']}');
