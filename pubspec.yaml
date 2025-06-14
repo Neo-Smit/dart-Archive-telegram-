@@ -8,3 +8,4 @@ environment:
 dependencies:
   shelf: ^1.4.0
   shelf_router: ^1.1.3
+  http: ^0.13.6
