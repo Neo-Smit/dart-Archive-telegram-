@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:googleapis_auth/auth_io.dart';
 import 'package:jose/jose.dart';
 
 import 'myConstants.dart';
@@ -113,51 +114,20 @@ Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, Stri
   }
 }
 Future<String> getAccessTokenFromServiceAccount() async {
-  final jsonStr = Platform.environment['SERVICE_ACCOUNT_JSON'];
-  if (jsonStr == null) {
-    throw Exception('SERVICE_ACCOUNT_JSON not set');
-  }
-
-  final account = json.decode(jsonStr);
-
-  final now = DateTime.now().toUtc();
-  final jwt = JsonWebSignatureBuilder()
-    ..jsonContent = {
-      'iss': account['client_email'],
-      'scope': 'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email',
-      'aud': 'https://oauth2.googleapis.com/token',
-      'iat': (now.millisecondsSinceEpoch ~/ 1000),
-      'exp': (now.add(Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000),
-    }
-    ..addRecipient(JsonWebKey.fromJson({
-      'kty': 'RSA',
-      'alg': 'RS256',
-      'd': '', // private key не нужен тут
-      'n': '', // не нужен
-      'e': '', // не нужен
-      'privateKeyPem': account['private_key'],
-    }), algorithm: 'RS256');
-
-  final jws = jwt.build();
-
-  final jwtString = jws.toCompactSerialization();
-
-  final response = await http.post(
-    Uri.parse('https://oauth2.googleapis.com/token'),
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: {
-      'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      'assertion': jwtString,
-    },
+  final serviceAccountJson = jsonDecode(
+    await File('serviceAccount.json').readAsString(),
   );
 
-  if (response.statusCode == 200) {
-    final body = json.decode(response.body);
-    return body['access_token'];
-  } else {
-    print('Error getting token: ${response.body}');
-    throw Exception('Failed to get access token');
-  }
+  final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
+
+  final scopes = ['https://www.googleapis.com/auth/firebase.database'];
+
+  final client = await clientViaServiceAccount(credentials, scopes);
+  final accessToken = client.credentials.accessToken.data;
+
+  client.close();
+
+  return accessToken;
 }
 void main() async {
   final router = Router()..post('/webhook', _webhookHandler);

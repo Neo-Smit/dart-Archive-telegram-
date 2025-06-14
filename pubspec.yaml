@@ -10,3 +10,5 @@ dependencies:
   shelf_router: ^1.1.3
   http: ^0.13.6
   jose: ^0.3.4
+  googleapis_auth: ^1.4.0
+
