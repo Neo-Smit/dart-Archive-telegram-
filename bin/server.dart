@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:jose/jose.dart';
+
 import 'myConstants.dart';
 import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
@@ -13,8 +15,9 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
   final month = timestamp.month.toString().padLeft(2, '0');
   final day = timestamp.day.toString().padLeft(2, '0');
   final messageId = message['message_id'].toString();
+  final token = await getAccessTokenFromServiceAccount();
    // 👈 Укажи свой проект
-  final path = '$firebaseUrl$year/$month/$day/$messageId.json';
+  final path = '$firebaseUrl$year/$month/$day/$messageId.json?access_token=$token';
 
   final payload = jsonEncode({
     'text': message['text'],
@@ -80,29 +83,82 @@ Future<Response> _webhookHandler(Request request) async {
 
   return Response.ok('ok');
 }
-Future<void> fetchMessagesByDate(String year, String month, String day) async {
+Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, String day) async {
+  final formattedMonth = month.padLeft(2, '0');
+  final formattedDay = day.padLeft(2, '0');
+  final token = await getAccessTokenFromServiceAccount();
+
   final url = Uri.parse(
-    '$firebaseUrl/$year/$month/$day.json',
+    '$firebaseUrl/messages/$year/$formattedMonth/$formattedDay.json?access_token=$token',
   );
 
-  final response = await http.get(url);
+  try {
+    final response = await http.get(url);
 
-  if (response.statusCode == 200) {
-    final data = jsonDecode(response.body);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data == null) {
+        print('📭 Нет сообщений за $formattedDay.$formattedMonth.$year');
+        return {};
+      }
 
-    if (data == null) {
-      print('Нет сообщений за $day.$month.$year');
+      return Map<String, dynamic>.from(data);
     } else {
-      print('📬 Сообщения за $day.$month.$year:');
-      data.forEach((messageId, messageData) {
-        print('🔹 [$messageId]: ${messageData['text']}');
-      });
+      print('❌ Ошибка при чтении (${response.statusCode}): ${response.body}');
+      return {};
     }
-  } else {
-    print('Ошибка при чтении: ${response.statusCode}');
+  } catch (e) {
+    print('❌ Исключение при чтении: $e');
+    return {};
   }
 }
+Future<String> getAccessTokenFromServiceAccount() async {
+  final jsonStr = Platform.environment['SERVICE_ACCOUNT_JSON'];
+  if (jsonStr == null) {
+    throw Exception('SERVICE_ACCOUNT_JSON not set');
+  }
 
+  final account = json.decode(jsonStr);
+
+  final now = DateTime.now().toUtc();
+  final jwt = JsonWebSignatureBuilder()
+    ..jsonContent = {
+      'iss': account['client_email'],
+      'scope': 'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email',
+      'aud': 'https://oauth2.googleapis.com/token',
+      'iat': (now.millisecondsSinceEpoch ~/ 1000),
+      'exp': (now.add(Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000),
+    }
+    ..addRecipient(JsonWebKey.fromJson({
+      'kty': 'RSA',
+      'alg': 'RS256',
+      'd': '', // private key не нужен тут
+      'n': '', // не нужен
+      'e': '', // не нужен
+      'privateKeyPem': account['private_key'],
+    }), algorithm: 'RS256');
+
+  final jws = jwt.build();
+
+  final jwtString = jws.toCompactSerialization();
+
+  final response = await http.post(
+    Uri.parse('https://oauth2.googleapis.com/token'),
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: {
+      'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      'assertion': jwtString,
+    },
+  );
+
+  if (response.statusCode == 200) {
+    final body = json.decode(response.body);
+    return body['access_token'];
+  } else {
+    print('Error getting token: ${response.body}');
+    throw Exception('Failed to get access token');
+  }
+}
 void main() async {
   final router = Router()..post('/webhook', _webhookHandler);
 
@@ -113,5 +169,8 @@ void main() async {
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
   print('🚀 Server running on port $port');
-  await fetchMessagesByDate("2025","06","14");
+  final messages = await fetchMessagesByDate('2025', '06', '14');
+  messages.forEach((id, msg) {
+    print('🔸 $id: ${msg['text']}');
+  });
 }
