@@ -98,17 +98,21 @@ Future<Response> _webhookHandler(Request request) async {
 
   try {
     final data = jsonDecode(body);
+
+    // Обрабатываем только обычные сообщения
+    if (data.containsKey('message')) {
       await saveMessageToFirebase(data['message']);
-    // if (data.containsKey('message')) {
-    // }
+    } else {
+      print('⚠️ Игнорируется: не message');
+    }
+
   } catch (e) {
     print('❗ JSON parsing/saving error: $e');
-    await sendErrorToTelegram('❗ JSON parsing error: $e');
+    await sendErrorToTelegram('❗ JSON parsing error: $e\n\n$body');
   }
 
   return Response.ok('ok');
 }
-
 // 📦 Чтение сообщений по дате (например, в консоли)
 Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, String day) async {
   final token = await getAccessTokenFromServiceAccount();
