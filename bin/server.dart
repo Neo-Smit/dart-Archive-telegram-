@@ -19,7 +19,10 @@ Future<String> getAccessTokenFromServiceAccount() async {
   final serviceAccountJson = jsonDecode(envJson);
   final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
 
-  final scopes = ['https://www.googleapis.com/auth/firebase.database'];
+  final scopes = [
+    'https://www.googleapis.com/auth/firebase.database',
+    'https://www.googleapis.com/auth/userinfo.email',
+  ];
   final client = await clientViaServiceAccount(credentials, scopes);
   final accessToken = client.credentials.accessToken.data;
   client.close();
