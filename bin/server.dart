@@ -29,25 +29,29 @@ Future<String> getAccessTokenFromServiceAccount() async {
   return accessToken;
 }
 
-// 💬 Сохранение сообщения Telegram в Firebase
+// 💬 Безопасное сохранение Telegram-сообщения в Firebase
 Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
   final timestamp = DateTime.now();
   final year = timestamp.year.toString();
   final month = timestamp.month.toString().padLeft(2, '0');
   final day = timestamp.day.toString().padLeft(2, '0');
-  final messageId = message['message_id'].toString();
+  final messageId = message['message_id']?.toString() ?? 'unknown';
 
   final token = await getAccessTokenFromServiceAccount();
   final url = '$firebaseUrl/messages/$year/$month/$day/$messageId.json?access_token=$token';
 
+  // Безопасное извлечение "from"
+  final from = message['from'];
+  final fromMap = from is Map<String, dynamic> ? from : {};
+
   final payload = {
-    'text': message['text'],
+    'text': message['text']?.toString() ?? '',
     'from': {
-      'id': message['from']['id'],
-      'username': message['from']['username'],
-      'first_name': message['from']['first_name'],
+      'id': fromMap['id'],
+      'username': fromMap['username']?.toString() ?? '',
+      'first_name': fromMap['first_name']?.toString() ?? '',
     },
-    'chat_id': message['chat']['id'],
+    'chat_id': message['chat']?['id'],
     'timestamp': DateTime.now().toUtc().toIso8601String(),
   };
 
@@ -61,15 +65,16 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
     if (response.statusCode == 200) {
       print('✅ Message saved to Firebase');
     } else {
-      print('❌ Failed to save message. Code: ${response.statusCode}');
-      await sendErrorToTelegram('❌ Firebase error: ${response.statusCode}');
+      final errorMsg = '❌ Failed to save message. Code: ${response.statusCode}';
+      print(errorMsg);
+      await sendErrorToTelegram(errorMsg);
     }
-  } catch (e) {
-    print('❗ Save exception: $e');
-    await sendErrorToTelegram('❗ Save exception: $e');
+  } catch (e, st) {
+    final errorText = '❗ Save exception: $e\n$st';
+    print(errorText);
+    await sendErrorToTelegram(errorText);
   }
 }
-
 // 📩 Отправка ошибок в Telegram
 Future<void> sendErrorToTelegram(String message) async {
   final uri = Uri.parse(
@@ -135,16 +140,4 @@ void main() async {
   final server = await io.serve(handler, InternetAddress.anyIPv4, port);
 
   print('🚀 Server running on port $port');
-
-  // Пример: Показать сообщения за сегодня (для теста)
-  final now = DateTime.now();
-  final messages = await fetchMessagesByDate(
-    now.year.toString(),
-    now.month.toString().padLeft(2, '0'),
-    now.day.toString().padLeft(2, '0'),
-  );
-
-  messages.forEach((id, msg) {
-    print('🔸 $id: ${msg['text']}');
-  });
 }
