@@ -48,7 +48,7 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
       'first_name': message['from']['first_name'],
     },
     'chat_id': message['chat']['id'],
-    'timestamp': timestamp.toIso8601String(),
+    'timestamp': DateTime.now().toUtc().toIso8601String(),
   };
 
   try {
