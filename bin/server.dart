@@ -38,10 +38,11 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
   final messageId = msg['message_id'].toString();
 
   final token = await getAccessToken();
-  final url = '$firebaseUrl/messages/$year/$month/$day/$messageId.json?access_token=$token';
+  final baseUrl = '$firebaseUrl/messages/$year/$month/$day/$messageId';
+  final url = '$baseUrl.json?access_token=$token';
 
   final from = msg['from'] ?? {};
-  final payload = {
+  final newEntry = {
     'text': msg['text'] ?? '',
     'from': {
       'id': from['id'],
@@ -52,19 +53,42 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
     'timestamp': timestamp.toUtc().toIso8601String(),
   };
 
-  final res = await http.put(Uri.parse(url),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode(payload),
-  );
+  try {
+    // 1. Проверяем, существует ли уже это сообщение
+    final getRes = await http.get(Uri.parse(url));
+    final exists = getRes.statusCode == 200 && getRes.body != 'null';
 
-  if (res.statusCode == 200) {
-    print('✅ Saved to Firebase');
-  } else {
-    final error = '❌ Firebase save error ${res.statusCode}: ${res.body}';
+    if (!exists) {
+      // 2. Если нет — просто сохраняем
+      final putRes = await http.put(Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(newEntry),
+      );
+      if (putRes.statusCode == 200) {
+        print('✅ Сохранено как основное сообщение');
+      } else {
+        throw Exception('Ошибка при сохранении: ${putRes.body}');
+      }
+    } else {
+      // 3. Если есть — добавляем в дочерние
+      final childUrl = '$baseUrl/children.json?access_token=$token';
+      final postRes = await http.post(Uri.parse(childUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(newEntry),
+      );
+      if (postRes.statusCode == 200) {
+        print('✅ Добавлено как дочернее сообщение');
+      } else {
+        throw Exception('Ошибка при добавлении: ${postRes.body}');
+      }
+    }
+  } catch (e) {
+    final error = '❗ Firebase save error: $e';
     print(error);
     await sendErrorToTelegram(error);
   }
 }
+
 
 /// Отправка ошибок в Telegram
 Future<void> sendErrorToTelegram(String message) async {
