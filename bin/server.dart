@@ -2,148 +2,131 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:googleapis_auth/auth_io.dart';
-import 'package:http/http.dart' as http;
 import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart' as io;
+import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
-import 'myConstants.dart';
+import 'package:http/http.dart' as http;
+import 'package:dotenv/dotenv.dart';
 
-const firebaseUrl = MyConstants.firebaseUrl;
-const telegramBotToken = MyConstants.botToken;
-const telegramChatId = MyConstants.chat_id_Test;
+final dotenv = DotEnv()..load();
 
-// 🔐 Получение access_token из переменной окружения SERVICE_ACCOUNT
-Future<String> getAccessTokenFromServiceAccount() async {
-  final envJson = Platform.environment['Service_Account'];
-  if (envJson == null) throw Exception('Service_Account is not set');
-  final serviceAccountJson = jsonDecode(envJson);
-  final credentials = ServiceAccountCredentials.fromJson(serviceAccountJson);
+final botToken = Platform.environment['BOT_TOKEN']!;
+final chatId   = Platform.environment['CHAT_ID_TEST']!;
+final firebaseUrl = Platform.environment['FIREBASE_URL']!;
+final serviceJson = Platform.environment['Service_Account']!;
+final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
 
+final allowedChatIds = {int.parse(chatId)}; // разрешённые чаты
+
+/// Получение access_token через Service Account
+Future<String> getAccessToken() async {
+  final serviceJson = dotenv['SERVICE_ACCOUNT'];
+  if (serviceJson == null) throw Exception('❌ SERVICE_ACCOUNT is not set');
+
+  final credentials = ServiceAccountCredentials.fromJson(jsonDecode(serviceJson));
   final scopes = [
-    'https://www.googleapis.com/auth/firebase.database',
-    'https://www.googleapis.com/auth/userinfo.email',
-  ];
+      'https://www.googleapis.com/auth/firebase.database'
+      'https://www.googleapis.com/auth/userinfo.email',];
+
   final client = await clientViaServiceAccount(credentials, scopes);
-  final accessToken = client.credentials.accessToken.data;
+  final token = client.credentials.accessToken.data;
   client.close();
-  return accessToken;
+  return token;
 }
 
-// 💬 Безопасное сохранение Telegram-сообщения в Firebase
-Future<void> saveMessageToFirebase(Map<String, dynamic> message) async {
+/// Сохранение сообщения в Firebase
+Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
   final timestamp = DateTime.now();
-  final year = timestamp.year.toString();
-  final month = timestamp.month.toString().padLeft(2, '0');
-  final day = timestamp.day.toString().padLeft(2, '0');
-  final messageId = message['message_id']?.toString() ?? 'unknown';
+  final year = '${timestamp.year}';
+  final month = '${timestamp.month}'.padLeft(2, '0');
+  final day = '${timestamp.day}'.padLeft(2, '0');
+  final messageId = msg['message_id'].toString();
 
-  final token = await getAccessTokenFromServiceAccount();
+  final token = await getAccessToken();
   final url = '$firebaseUrl/messages/$year/$month/$day/$messageId.json?access_token=$token';
 
-  // Безопасное извлечение "from"
-  final from = message['from'];
-  final fromMap = from is Map<String, dynamic> ? from : {};
-
+  final from = msg['from'] ?? {};
   final payload = {
-    'text': message['text']?.toString() ?? '',
+    'text': msg['text'] ?? '',
     'from': {
-      'id': fromMap['id'],
-      'username': fromMap['username']?.toString() ?? '',
-      'first_name': fromMap['first_name']?.toString() ?? '',
+      'id': from['id'],
+      'username': from['username'] ?? '',
+      'first_name': from['first_name'] ?? '',
     },
-    'chat_id': message['chat']?['id'],
-    'timestamp': DateTime.now().toUtc().toIso8601String(),
+    'chat_id': msg['chat']?['id'],
+    'timestamp': timestamp.toUtc().toIso8601String(),
   };
 
-  try {
-    final response = await http.put(
-      Uri.parse(url),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(payload),
-    );
-
-    if (response.statusCode == 200) {
-      print('✅ Message saved to Firebase');
-    } else {
-      final errorMsg = '❌ Failed to save message. Code: ${response.statusCode}';
-      print(errorMsg);
-      await sendErrorToTelegram(errorMsg);
-    }
-  } catch (e, st) {
-    final errorText = '❗ Save exception: $e\n$st';
-    print(errorText);
-    await sendErrorToTelegram(errorText);
-  }
-}
-// 📩 Отправка ошибок в Telegram
-Future<void> sendErrorToTelegram(String message) async {
-  final uri = Uri.parse(
-    'https://api.telegram.org/bot$telegramBotToken/sendMessage',
+  final res = await http.put(Uri.parse(url),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(payload),
   );
 
-  final response = await http.post(uri, body: {
-    'chat_id': telegramChatId,
+  if (res.statusCode == 200) {
+    print('✅ Saved to Firebase');
+  } else {
+    final error = '❌ Firebase save error ${res.statusCode}: ${res.body}';
+    print(error);
+    await sendErrorToTelegram(error);
+  }
+}
+
+/// Отправка ошибок в Telegram
+Future<void> sendErrorToTelegram(String message) async {
+  final uri = Uri.parse('https://api.telegram.org/bot$chatId/sendMessage');
+  final res = await http.post(uri, body: {
+    'chat_id': chatId,
     'text': message,
   });
 
-  if (response.statusCode != 200) {
-    print('⚠️ Failed to send error to Telegram: ${response.body}');
+  if (res.statusCode != 200) {
+    print('⚠️ Telegram error report failed: ${res.body}');
   }
 }
 
-// 🔧 Обработка webhook Telegram
+/// Обработчик webhook
 Future<Response> _webhookHandler(Request request) async {
+  if (request.method != 'POST') {
+    return Response.forbidden('⛔ Only POST allowed');
+  }
+
   final body = await request.readAsString();
-  print('📥 Webhook received:\n$body');
+  print('📥 Webhook payload: $body');
 
   try {
     final data = jsonDecode(body);
+    final message = data['message'] ?? data['edit_message'];
 
-    // Обрабатываем только обычные сообщения
-    if (data.containsKey('message')) {
-      await saveMessageToFirebase(data['message']);
-    } else if(data.containsKey('edit_message')){
-      await saveMessageToFirebase(data['edit_message']);
-    }else{
-      print('⚠️ Игнорируется: не message или edit_)message');
+    if (message != null) {
+      final chatId = message['chat']?['id'];
+      if (chatId == null || !allowedChatIds.contains(chatId)) {
+        print('🚫 Invalid chat_id: $chatId');
+        return Response.forbidden('⛔ Chat not allowed');
+      }
+
+      await saveMessageToFirebase(message);
+    } else {
+      print('⚠️ Ignored: Not a message or edit_message');
     }
-
-  } catch (e) {
-    print('❗ JSON parsing/saving error: $e');
-    await sendErrorToTelegram('❗ JSON parsing error: $e\n\n$body');
+  } catch (e, st) {
+    final error = '❗ JSON error: $e\n$st\nBODY:\n$body';
+    print(error);
+    await sendErrorToTelegram(error);
   }
 
   return Response.ok('ok');
 }
-// 📦 Чтение сообщений по дате (например, в консоли)
-Future<Map<String, dynamic>> fetchMessagesByDate(String year, String month, String day) async {
-  final token = await getAccessTokenFromServiceAccount();
-  final url = Uri.parse('$firebaseUrl/messages/$year/$month/$day.json?access_token=$token');
-
-  try {
-    final response = await http.get(url);
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data != null ? Map<String, dynamic>.from(data) : {};
-    } else {
-      print('❌ Error fetching messages: ${response.statusCode}');
-      return {};
-    }
-  } catch (e) {
-    print('❌ Exception while fetching: $e');
-    return {};
-  }
-}
 
 void main() async {
-  final router = Router()..post('/webhook', _webhookHandler);
+  final router = Router()
+    ..post('/webhook/$webhookSecret', _webhookHandler); // секретный путь
 
   final handler = const Pipeline()
       .addMiddleware(logRequests())
       .addHandler(router);
 
   final port = int.parse(Platform.environment['PORT'] ?? '8080');
-  final server = await io.serve(handler, InternetAddress.anyIPv4, port);
+  final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
 
-  print('🚀 Server running on port $port');
+  print('🚀 Server running at http://localhost:$port');
 }
