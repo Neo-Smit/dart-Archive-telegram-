@@ -102,8 +102,10 @@ Future<Response> _webhookHandler(Request request) async {
     // Обрабатываем только обычные сообщения
     if (data.containsKey('message')) {
       await saveMessageToFirebase(data['message']);
-    } else {
-      print('⚠️ Игнорируется: не message');
+    } else if(data.containsKey('edit_message')){
+      await saveMessageToFirebase(data['edit_message']);
+    }else{
+      print('⚠️ Игнорируется: не message или edit_)message');
     }
 
   } catch (e) {
