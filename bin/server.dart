@@ -20,7 +20,7 @@ final allowedChatIds = {int.parse(goalChatId)}; // разрешённые чат
 
 /// Получение access_token через Service Account
 Future<String> getAccessToken() async {
-  final serviceJson = Platform.environment['SERVICE_ACCOUNT'];
+  final serviceJson = Platform.environment['Service_Account'];
   if (serviceJson == null) throw Exception('❌ SERVICE_ACCOUNT is not set');
 
   final credentials = ServiceAccountCredentials.fromJson(jsonDecode(serviceJson));
