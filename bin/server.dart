@@ -74,7 +74,7 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
 
 /// Отправка ошибок в Telegram
 Future<void> sendErrorToTelegram(String message) async {
-  final uri = Uri.parse('https://api.telegram.org/bot$chatId/sendMessage');
+  final uri = Uri.parse('https://api.telegram.org/bot$botToken/sendMessage');
   final res = await http.post(uri, body: {
     'chat_id': chatId,
     'text': message,
@@ -104,7 +104,6 @@ Future<Response> _webhookHandler(Request request) async {
         print('🚫 Invalid chat_id: $chatId');
         return Response.forbidden('⛔ Chat not allowed');
       }
-
       await saveMessageToFirebase(message);
     } else {
       print('⚠️ Ignored: Not a message or edit_message');
