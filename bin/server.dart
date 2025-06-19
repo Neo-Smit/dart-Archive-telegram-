@@ -12,11 +12,12 @@ final dotenv = DotEnv()..load();
 
 final botToken = Platform.environment['BOT_TOKEN']!;
 final chatId   = Platform.environment['CHAT_ID_TEST']!;
+final goalChatId   = Platform.environment['CHAT_ID_GOAL']!;
 final firebaseUrl = Platform.environment['FIREBASE_URL']!;
 final serviceJson = Platform.environment['Service_Account']!;
 final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
 
-final allowedChatIds = {int.parse(chatId)}; // разрешённые чаты
+final allowedChatIds = {int.parse(goalChatId)}; // разрешённые чаты
 
 /// Получение access_token через Service Account
 Future<String> getAccessToken() async {
