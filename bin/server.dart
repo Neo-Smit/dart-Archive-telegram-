@@ -6,9 +6,6 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 import 'package:http/http.dart' as http;
-import 'package:dotenv/dotenv.dart';
-
-final dotenv = DotEnv()..load();
 
 final botToken = Platform.environment['BOT_TOKEN']!;
 final chatId   = Platform.environment['CHAT_ID_TEST']!;
@@ -17,17 +14,15 @@ final firebaseUrl = Platform.environment['FIREBASE_URL']!;
 final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
 
 final allowedChatIds = {int.parse(goalChatId)}; // разрешённые чаты
-
 /// Получение access_token через Service Account
 Future<String> getAccessToken() async {
   final serviceJson = Platform.environment['Service_Account'];
   if (serviceJson == null) throw Exception('❌ SERVICE_ACCOUNT is not set');
-
   final credentials = ServiceAccountCredentials.fromJson(jsonDecode(serviceJson));
   final scopes = [
     'https://www.googleapis.com/auth/firebase.database',
-    'https://www.googleapis.com/auth/userinfo.email',];
-
+    'https://www.googleapis.com/auth/userinfo.email', // для доступа
+  ];
   final client = await clientViaServiceAccount(credentials, scopes);
   final token = client.credentials.accessToken.data;
   client.close();
@@ -95,7 +90,7 @@ Future<Response> _webhookHandler(Request request) async {
 
   try {
     final data = jsonDecode(body);
-    final message = data['message'] ?? data['edit_message'];
+    final message = data['message'] ?? data['edited_message'];
 
     if (message != null) {
       final chatId = message['chat']?['id'];
