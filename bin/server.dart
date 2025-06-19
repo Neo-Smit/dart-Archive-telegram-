@@ -106,7 +106,7 @@ Future<Response> _webhookHandler(Request request) async {
       }
       await saveMessageToFirebase(message);
     } else {
-      print('⚠️ Ignored: Not a message or edit_message');
+      print('⚠️ Ignored: Not a message or edit_message ');
     }
   } catch (e, st) {
     final error = '❗ JSON error: $e\n$st\nBODY:\n$body';
