@@ -35,10 +35,10 @@ Future<String> getAccessToken() async {
 Future<void> forwardMessageToGoalChat(Map<String, dynamic> message) async {
   final uri = Uri.parse('https://api.telegram.org/bot$botToken/forwardMessage');
 
-  final sourceChatId = message['chat']?['id'];
+  final sourceChatId = ARCHIVE_CHANNEL_GOAL_ID;
   final messageId = message['message_id'];
 
-  if (sourceChatId == null || messageId == null) {
+  if (messageId == null) {
     print('⚠️ Невозможно переслать сообщение: отсутствует chat_id или message_id');
     return;
   }
