@@ -152,7 +152,7 @@ Future<Response> _webhookHandler(Request request) async {
       final chatId = message['chat']?['id'];
       if (chatId == null || !allowedChatIds.contains(chatId)) {
         print('🚫 Invalid chat_id: $chatId');
-        if(ARCHIVE_CHANNEL.contains(chatId)){
+        if(int.parse(ARCHIVE_CHANNEL)==(chatId)){
           await forwardMessageToGoalChat(message); // <-- добавлено
         }
         return Response.forbidden('⛔ Chat not allowed');
