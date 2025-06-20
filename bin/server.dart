@@ -12,6 +12,8 @@ final chatId   = Platform.environment['CHAT_ID_TEST']!;
 final goalChatId   = Platform.environment['CHAT_ID_GOAL']!;
 final firebaseUrl = Platform.environment['FIREBASE_URL']!;
 final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
+final ARCHIVE_CHANNEL = Platform.environment['ARCHIVE_CHANNEL']!;
+final ARCHIVE_CHANNEL_GOAL_ID = Platform.environment['ARCHIVE_CHANNEL_GOAL_ID']!;
 
 final allowedChatIds = {int.parse(goalChatId)}; // разрешённые чаты
 /// Получение access_token через Service Account
@@ -27,6 +29,33 @@ Future<String> getAccessToken() async {
   final token = client.credentials.accessToken.data;
   client.close();
   return token;
+}
+
+/// Пересылка сообщения в целевой чат
+Future<void> forwardMessageToGoalChat(Map<String, dynamic> message) async {
+  final uri = Uri.parse('https://api.telegram.org/bot$botToken/forwardMessage');
+
+  final sourceChatId = message['chat']?['id'];
+  final messageId = message['message_id'];
+
+  if (sourceChatId == null || messageId == null) {
+    print('⚠️ Невозможно переслать сообщение: отсутствует chat_id или message_id');
+    return;
+  }
+
+  final response = await http.post(uri, body: {
+    'chat_id': ARCHIVE_CHANNEL_GOAL_ID,
+    'from_chat_id': sourceChatId.toString(),
+    'message_id': messageId.toString(),
+  });
+
+  if (response.statusCode == 200) {
+    print('📤 Сообщение успешно переслано в $ARCHIVE_CHANNEL_GOAL_ID');
+  } else {
+    final error = '❗ Ошибка при пересылке: ${response.body}';
+    print(error);
+    await sendErrorToTelegram(error);
+  }
 }
 
 /// Сохранение сообщения в Firebase
@@ -114,12 +143,18 @@ Future<Response> _webhookHandler(Request request) async {
 
   try {
     final data = jsonDecode(body);
-    final message = data['message'] ?? data['edited_message'];
+    final message = data['message']
+        ?? data['edited_message']
+        ?? data['channel_post']
+        ?? data['edited_channel_post'];
 
     if (message != null) {
       final chatId = message['chat']?['id'];
       if (chatId == null || !allowedChatIds.contains(chatId)) {
         print('🚫 Invalid chat_id: $chatId');
+        if(ARCHIVE_CHANNEL.contains(chatId)){
+          await forwardMessageToGoalChat(message); // <-- добавлено
+        }
         return Response.forbidden('⛔ Chat not allowed');
       }
       await saveMessageToFirebase(message);
