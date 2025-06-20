@@ -44,13 +44,13 @@ Future<void> forwardMessageToGoalChat(Map<String, dynamic> message) async {
   }
 
   final response = await http.post(uri, body: {
-    'chat_id': ARCHIVE_CHANNEL_GOAL_ID,
+    'chat_id': ARCHIVE_CHANNEL,
     'from_chat_id': sourceChatId.toString(),
     'message_id': messageId.toString(),
   });
 
   if (response.statusCode == 200) {
-    print('📤 Сообщение успешно переслано в $ARCHIVE_CHANNEL_GOAL_ID');
+    print('📤 Сообщение успешно переслано в $ARCHIVE_CHANNEL');
   } else {
     final error = '❗ Ошибка при пересылке: ${response.body}';
     print(error);
@@ -152,7 +152,7 @@ Future<Response> _webhookHandler(Request request) async {
       final chatId = message['chat']?['id'];
       if (chatId == null || !allowedChatIds.contains(chatId)) {
         print('🚫 Invalid chat_id: $chatId');
-        if(int.parse(ARCHIVE_CHANNEL)==(chatId)){
+        if(int.parse(ARCHIVE_CHANNEL_GOAL_ID)==(chatId)){
           await forwardMessageToGoalChat(message); // <-- добавлено
         }
         return Response.forbidden('⛔ Chat not allowed');
