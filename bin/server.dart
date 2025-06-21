@@ -1,3 +1,5 @@
+/// Полный код с поддержкой media_group, копирования сообщений, фото, документов и caption'ов
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,22 +10,24 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:http/http.dart' as http;
 
 final botToken = Platform.environment['BOT_TOKEN']!;
-final chatId   = Platform.environment['CHAT_ID_TEST']!;
-final goalChatId   = Platform.environment['CHAT_ID_GOAL']!;
+final chatId = Platform.environment['CHAT_ID_TEST']!;
+final goalChatId = Platform.environment['CHAT_ID_GOAL']!;
 final firebaseUrl = Platform.environment['FIREBASE_URL']!;
 final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
 final ARCHIVE_CHANNEL = Platform.environment['ARCHIVE_CHANNEL']!;
 final ARCHIVE_CHANNEL_GOAL_ID = Platform.environment['ARCHIVE_CHANNEL_GOAL_ID']!;
 
-final allowedChatIds = {int.parse(goalChatId)}; // разрешённые чаты
-/// Получение access_token через Service Account
+final allowedChatIds = {int.parse(goalChatId)};
+final _mediaGroupCache = <String, List<Map<String, dynamic>>>{};
+final _mediaGroupTimers = <String, Timer>{};
+
 Future<String> getAccessToken() async {
   final serviceJson = Platform.environment['Service_Account'];
   if (serviceJson == null) throw Exception('❌ SERVICE_ACCOUNT is not set');
   final credentials = ServiceAccountCredentials.fromJson(jsonDecode(serviceJson));
   final scopes = [
     'https://www.googleapis.com/auth/firebase.database',
-    'https://www.googleapis.com/auth/userinfo.email', // для доступа
+    'https://www.googleapis.com/auth/userinfo.email',
   ];
   final client = await clientViaServiceAccount(credentials, scopes);
   final token = client.credentials.accessToken.data;
@@ -31,34 +35,17 @@ Future<String> getAccessToken() async {
   return token;
 }
 
-/// Пересылка сообщения в целевой чат
-Future<void> forwardMessageToGoalChat(Map<String, dynamic> message) async {
-  final uri = Uri.parse('https://api.telegram.org/bot$botToken/forwardMessage');
-
-  final sourceChatId = ARCHIVE_CHANNEL_GOAL_ID;
-  final messageId = message['message_id'];
-
-  if (messageId == null) {
-    print('⚠️ Невозможно переслать сообщение: отсутствует chat_id или message_id');
-    return;
-  }
-  print('message_id: ${messageId.toString()}');
-  final response = await http.post(uri, body: {
-    'chat_id': ARCHIVE_CHANNEL,
-    'from_chat_id': sourceChatId.toString(),
-    'message_id': messageId.toString(),
+Future<void> sendErrorToTelegram(String message) async {
+  final uri = Uri.parse('https://api.telegram.org/bot$botToken/sendMessage');
+  final res = await http.post(uri, body: {
+    'chat_id': chatId,
+    'text': message,
   });
-
-  if (response.statusCode == 200) {
-    print('📤 Сообщение успешно переслано в $ARCHIVE_CHANNEL');
-  } else {
-    final error = '❗ Ошибка при пересылке: ${response.body}';
-    print(error);
-    await sendErrorToTelegram(error);
+  if (res.statusCode != 200) {
+    print('⚠️ Telegram error report failed: ${res.body}');
   }
 }
 
-/// Сохранение сообщения в Firebase
 Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
   final timestamp = DateTime.now();
   final year = '${timestamp.year}';
@@ -83,12 +70,9 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
   };
 
   try {
-    // 1. Проверяем, существует ли уже это сообщение
     final getRes = await http.get(Uri.parse(url));
     final exists = getRes.statusCode == 200 && getRes.body != 'null';
-
     if (!exists) {
-      // 2. Если нет — просто сохраняем
       final putRes = await http.put(Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(newEntry),
@@ -99,7 +83,6 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
         throw Exception('Ошибка при сохранении: ${putRes.body}');
       }
     } else {
-      // 3. Если есть — добавляем в дочерние
       final childUrl = '$baseUrl/children.json?access_token=$token';
       final postRes = await http.post(Uri.parse(childUrl),
         headers: {'Content-Type': 'application/json'},
@@ -118,50 +101,97 @@ Future<void> saveMessageToFirebase(Map<String, dynamic> msg) async {
   }
 }
 
+Future<void> copyMessageManually(Map<String, dynamic> msg) async {
+  final caption = msg['caption'] ?? '';
+  final text = msg['text'] ?? '';
 
-/// Отправка ошибок в Telegram
-Future<void> sendErrorToTelegram(String message) async {
-  final uri = Uri.parse('https://api.telegram.org/bot$botToken/sendMessage');
-  final res = await http.post(uri, body: {
-    'chat_id': chatId,
-    'text': message,
-  });
+  if (msg.containsKey('media_group_id')) {
+    final groupId = msg['media_group_id'];
+    _mediaGroupCache[groupId] = _mediaGroupCache[groupId] ?? [];
+    _mediaGroupCache[groupId]!.add(msg);
 
-  if (res.statusCode != 200) {
-    print('⚠️ Telegram error report failed: ${res.body}');
+    _mediaGroupTimers[groupId]?.cancel();
+    _mediaGroupTimers[groupId] = Timer(const Duration(seconds: 2), () async {
+      final group = _mediaGroupCache.remove(groupId);
+      _mediaGroupTimers.remove(groupId);
+      if (group != null && group.isNotEmpty) {
+        final media = group.map((m) {
+          if (m.containsKey('photo')) {
+            return {
+              'type': 'photo',
+              'media': m['photo'].last['file_id'],
+              if (m['caption'] != null) 'caption': m['caption'],
+            };
+          } else if (m.containsKey('document')) {
+            return {
+              'type': 'document',
+              'media': m['document']['file_id'],
+              if (m['caption'] != null) 'caption': m['caption'],
+            };
+          }
+          return null;
+        }).whereType<Map<String, dynamic>>().toList();
+
+        if (media.isNotEmpty) {
+          final uri = Uri.parse('https://api.telegram.org/bot$botToken/sendMediaGroup');
+          await http.post(uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'chat_id': goalChatId,
+                'media': media,
+              }));
+        }
+      }
+    });
+  } else if (msg.containsKey('photo')) {
+    final fileId = msg['photo'].last['file_id'];
+    await http.post(
+      Uri.parse('https://api.telegram.org/bot$botToken/sendPhoto'),
+      body: {
+        'chat_id': goalChatId,
+        'photo': fileId,
+        'caption': caption.isNotEmpty ? caption : text,
+      },
+    );
+  } else if (msg.containsKey('document')) {
+    final fileId = msg['document']['file_id'];
+    await http.post(
+      Uri.parse('https://api.telegram.org/bot$botToken/sendDocument'),
+      body: {
+        'chat_id': goalChatId,
+        'document': fileId,
+        'caption': caption.isNotEmpty ? caption : text,
+      },
+    );
+  } else if (text.isNotEmpty) {
+    await http.post(
+      Uri.parse('https://api.telegram.org/bot$botToken/sendMessage'),
+      body: {
+        'chat_id': goalChatId,
+        'text': text,
+      },
+    );
   }
 }
 
-/// Обработчик webhook
 Future<Response> _webhookHandler(Request request) async {
-  if (request.method != 'POST') {
-    return Response.forbidden('⛔ Only POST allowed');
-  }
-
+  if (request.method != 'POST') return Response.forbidden('⛔ Only POST allowed');
   final body = await request.readAsString();
   print('📥 Webhook payload: $body');
 
   try {
     final data = jsonDecode(body);
-    final message = data['message']
-        ?? data['edited_message']
-        ?? data['channel_post']
-        ?? data['edited_channel_post'];
+    final message = data['message'] ?? data['edited_message'] ?? data['channel_post'] ?? data['edited_channel_post'];
+    if (message == null) return Response.ok('Ignored');
 
-    if (message != null) {
-      final chatId = message['chat']?['id'];
-      if (chatId == null || !allowedChatIds.contains(chatId)) {
-        print('🚫 Invalid chat_id: $chatId');
-        if(int.parse(ARCHIVE_CHANNEL_GOAL_ID)==(chatId)){
-          print(chatId);
-          await forwardMessageToGoalChat(message); // <-- добавлено
-        }
-        return Response.forbidden('⛔ Chat not allowed');
-      }
-      await saveMessageToFirebase(message);
-    } else {
-      print('⚠️ Ignored: Not a message or edit_message ');
+    final chatId = message['chat']?['id'];
+    if (chatId == null || (!allowedChatIds.contains(chatId) && chatId.toString() != ARCHIVE_CHANNEL_GOAL_ID)) {
+      print('🚫 Invalid chat_id: $chatId');
+      return Response.forbidden('⛔ Chat not allowed');
     }
+
+    await saveMessageToFirebase(message);
+    await copyMessageManually(message);
   } catch (e, st) {
     final error = '❗ JSON error: $e\n$st\nBODY:\n$body';
     print(error);
@@ -173,7 +203,7 @@ Future<Response> _webhookHandler(Request request) async {
 
 void main() async {
   final router = Router()
-    ..post('/webhook/$webhookSecret', _webhookHandler); // секретный путь
+    ..post('/webhook/$webhookSecret', _webhookHandler);
 
   final handler = const Pipeline()
       .addMiddleware(logRequests())
