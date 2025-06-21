@@ -190,7 +190,7 @@ Future<Response> _webhookHandler(Request request) async {
       return Response.forbidden('⛔ Chat not allowed');
     }
     await saveMessageToFirebase(message);
-  if(chatId.toString() != ARCHIVE_CHANNEL_GOAL_ID){
+  if(chatId.toString() == ARCHIVE_CHANNEL_GOAL_ID){
     await copyMessageManually(message);
   }
   } catch (e, st) {
