@@ -186,15 +186,20 @@ Future<Response> _webhookHandler(Request request) async {
     if (message == null) return Response.ok('Ignored');
 
     final chatId = message['chat']?['id'];
-    if (chatId == null ||!allowedChatIds.contains(chatId)) {
-      print('🚫 Invalid chat_id: $chatId');
-      return Response.forbidden('⛔ Chat not allowed');
-    }else{
+    if (chatId == null) {
+      print('🚫 Отсутствует chat_id');
+      return Response.forbidden('⛔ Chat ID is missing');
+    }
+
+// 1. Если сообщение из разрешённого чата → сохранить
+    if (allowedChatIds.contains(chatId)) {
       await saveMessageToFirebase(message);
     }
-  if(chatId.toString() == ARCHIVE_CHANNEL_GOAL_ID){
-    await copyMessageManually(message);
-  }
+
+// 2. Если сообщение пришло из исходного канала → копировать вручную
+    if (chatId.toString() == ARCHIVE_CHANNEL_GOAL_ID) {
+      await copyMessageManually(message);
+    }
   } catch (e, st) {
     final error = '❗ JSON error: $e\n$st\nBODY:\n$body';
     print(error);
