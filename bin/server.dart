@@ -42,7 +42,7 @@ Future<void> forwardMessageToGoalChat(Map<String, dynamic> message) async {
     print('⚠️ Невозможно переслать сообщение: отсутствует chat_id или message_id');
     return;
   }
-
+  print('message_id: ${messageId.toString()}');
   final response = await http.post(uri, body: {
     'chat_id': ARCHIVE_CHANNEL,
     'from_chat_id': sourceChatId.toString(),
@@ -153,6 +153,7 @@ Future<Response> _webhookHandler(Request request) async {
       if (chatId == null || !allowedChatIds.contains(chatId)) {
         print('🚫 Invalid chat_id: $chatId');
         if(int.parse(ARCHIVE_CHANNEL_GOAL_ID)==(chatId)){
+          print(chatId);
           await forwardMessageToGoalChat(message); // <-- добавлено
         }
         return Response.forbidden('⛔ Chat not allowed');
