@@ -172,6 +172,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
       },
     );
   }
+  print("message ${msg} was sended in ARCHIVE CHANNELE");
 }
 
 Future<Response> _webhookHandler(Request request) async {
@@ -185,7 +186,7 @@ Future<Response> _webhookHandler(Request request) async {
     if (message == null) return Response.ok('Ignored');
 
     final chatId = message['chat']?['id'];
-    if (chatId == null || !allowedChatIds.contains(chatId)) {
+    if (allowedChatIds.contains(chatId)) {
       print('🚫 Invalid chat_id: $chatId');
       return Response.forbidden('⛔ Chat not allowed');
     }
