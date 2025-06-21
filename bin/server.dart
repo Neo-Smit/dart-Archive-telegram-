@@ -186,11 +186,12 @@ Future<Response> _webhookHandler(Request request) async {
     if (message == null) return Response.ok('Ignored');
 
     final chatId = message['chat']?['id'];
-    if (allowedChatIds.contains(chatId)) {
+    if (chatId == null ||!allowedChatIds.contains(chatId)) {
       print('🚫 Invalid chat_id: $chatId');
       return Response.forbidden('⛔ Chat not allowed');
+    }else{
+      await saveMessageToFirebase(message);
     }
-    await saveMessageToFirebase(message);
   if(chatId.toString() == ARCHIVE_CHANNEL_GOAL_ID){
     await copyMessageManually(message);
   }
