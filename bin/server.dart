@@ -137,7 +137,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
           await http.post(uri,
               headers: {'Content-Type': 'application/json'},
               body: jsonEncode({
-                'chat_id': goalChatId,
+                'chat_id': ARCHIVE_CHANNEL,
                 'media': media,
               }));
         }
@@ -148,7 +148,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
     await http.post(
       Uri.parse('https://api.telegram.org/bot$botToken/sendPhoto'),
       body: {
-        'chat_id': goalChatId,
+        'chat_id': ARCHIVE_CHANNEL,
         'photo': fileId,
         'caption': caption.isNotEmpty ? caption : text,
       },
@@ -158,7 +158,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
     await http.post(
       Uri.parse('https://api.telegram.org/bot$botToken/sendDocument'),
       body: {
-        'chat_id': goalChatId,
+        'chat_id': ARCHIVE_CHANNEL,
         'document': fileId,
         'caption': caption.isNotEmpty ? caption : text,
       },
@@ -167,7 +167,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
     await http.post(
       Uri.parse('https://api.telegram.org/bot$botToken/sendMessage'),
       body: {
-        'chat_id': goalChatId,
+        'chat_id': ARCHIVE_CHANNEL,
         'text': text,
       },
     );
