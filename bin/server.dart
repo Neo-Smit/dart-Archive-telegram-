@@ -111,7 +111,7 @@ Future<void> copyMessageManually(Map<String, dynamic> msg) async {
     _mediaGroupCache[groupId]!.add(msg);
 
     _mediaGroupTimers[groupId]?.cancel();
-    _mediaGroupTimers[groupId] = Timer(const Duration(seconds: 2), () async {
+    _mediaGroupTimers[groupId] = Timer(const Duration(seconds: 3), () async {
       final group = _mediaGroupCache.remove(groupId);
       _mediaGroupTimers.remove(groupId);
       if (group != null && group.isNotEmpty) {
@@ -188,22 +188,25 @@ Future<Response> _webhookHandler(Request request) async {
     final chatId = message['chat']?['id'];
     if (chatId == null) {
       print('🚫 Отсутствует chat_id');
-      return Response.forbidden('⛔ Chat ID is missing');
+      return Response.ok('⛔ Chat ID is missing');
     }
 
 // 1. Если сообщение из разрешённого чата → сохранить
     if (allowedChatIds.contains(chatId)) {
-      await saveMessageToFirebase(message);
+      Future(() => saveMessageToFirebase(message))
+          .catchError((e, st) => sendErrorToTelegram('Firebase error: $e\n$st'));
     }
 
 // 2. Если сообщение пришло из исходного канала → копировать вручную
     if (chatId.toString() == ARCHIVE_CHANNEL_GOAL_ID) {
-      await copyMessageManually(message);
+      Future(() => copyMessageManually(message))
+          .catchError((e, st) => sendErrorToTelegram('Copy error: $e\n$st'));
     }
   } catch (e, st) {
     final error = '❗ JSON error: $e\n$st\nBODY:\n$body';
     print(error);
-    await sendErrorToTelegram(error);
+    Future(() => sendErrorToTelegram(error));
+    return Response.ok("ok");
   }
 
   return Response.ok('ok');
