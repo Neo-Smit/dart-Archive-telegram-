@@ -212,7 +212,8 @@ Future<Response> _webhookHandler(Request request) async {
 
 void main() async {
   final router = Router()
-    ..get('/ping', (Request req) => Response.ok('pong'))   // <--- вот сюда!
+    ..get('/ping', (Request req) => Response.ok('pong'))  // <--- вот сюда!
+    ..get('/', (Request req) => Response.ok('Hello World'))
     ..post('/webhook/$webhookSecret', _webhookHandler);
 
   final handler = const Pipeline()
