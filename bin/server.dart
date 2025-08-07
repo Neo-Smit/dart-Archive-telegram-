@@ -11,12 +11,9 @@ import 'package:http/http.dart' as http;
 
 final botToken = Platform.environment['BOT_TOKEN']!;
 final chatId = Platform.environment['CHAT_ID_TEST']!;
-final goalChatId = Platform.environment['CHAT_ID_GOAL']!;
 final webhookSecret = Platform.environment['WEBHOOK_SECRET']!;
 final ARCHIVE_CHANNEL = Platform.environment['ARCHIVE_CHANNEL']!;
 final ARCHIVE_CHANNEL_GOAL_ID = Platform.environment['ARCHIVE_CHANNEL_GOAL_ID']!;
-
-final allowedChatIds = {int.parse(goalChatId)};
 final _mediaGroupCache = <String, List<Map<String, dynamic>>>{};
 final _mediaGroupTimers = <String, Timer>{};
 
@@ -134,6 +131,8 @@ Future<Response> _webhookHandler(Request request) async {
 
 void main() async {
   final router = Router()
+    ..get('/ping', (Request req) => Response.ok('pong'))  // <--- вот сюда!
+    ..get('/', (Request req) => Response.ok('Hello World'))
     ..post('/webhook/$webhookSecret', _webhookHandler);
 
   final handler = const Pipeline()
